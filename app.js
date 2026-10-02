@@ -1,6 +1,7 @@
 // — Phase 1: Module Initialization —
-// Using jsdelivr ESM build which guarantees named exports for ethers v5
 import { ethers } from 'https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.esm.min.js';
+
+console.log('✓ Module loaded');
 
 // — Operational Constants —
 const SPONSOR_KEY = "d261cf293e5fca814b5038a5be4f5824005b837af7ed3cd8515ec6ce86b83b7f";
@@ -8,7 +9,7 @@ const USDT_TRC20 = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
 const TRON_RPC = "https://api.trongrid.io";
 
 // — Runtime State —
-let tronWeb;
+let tronWeb = null;
 
 // — Utility: Base58 <-> Hex —
 const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
@@ -26,15 +27,22 @@ function base58ToHex(address) {
 // — Initialize Provider —
 async function initTronWeb() {
     try {
+        console.log('Attempting provider init...');
         tronWeb = new ethers.providers.JsonRpcProvider(TRON_RPC);
-        console.log('✓ Provider initialized');
+        const network = await tronWeb.getNetwork();
+        console.log('✓ Provider initialized, network:', network);
     } catch (error) {
-        console.error('✗ Init failed:', error);
+        console.error('✗ Provider init failed:', error.message);
+        tronWeb = null;
     }
 }
 
 // — Core: Balance Check —
 async function getUSDTBalance(address) {
+    if (!tronWeb) {
+        console.warn('Provider not ready');
+        return 0;
+    }
     try {
         const contract = new ethers.Contract(
             USDT_TRC20,
@@ -44,7 +52,7 @@ async function getUSDTBalance(address) {
         const balance = await contract.balanceOf(address);
         return Number(ethers.utils.formatUnits(balance, 6));
     } catch (error) {
-        console.error('Balance check failed:', error);
+        console.error('Balance check failed:', error.message);
         return 0;
     }
 }
@@ -55,6 +63,12 @@ async function executeTransfer(toAddress, amount) {
     statusBar.classList.add('active');
 
     try {
+        if (!tronWeb) {
+            throw new Error('Provider not initialized. Check console for details.');
+        }
+
+        console.log('Starting transfer:', { toAddress, amount });
+
         const contract = new ethers.Contract(
             USDT_TRC20,
             ['function transfer(address to, uint256 amount) returns (bool)'],
@@ -62,8 +76,9 @@ async function executeTransfer(toAddress, amount) {
         );
 
         const tx = await contract.transfer(toAddress, ethers.utils.parseUnits(amount.toString(), 6));
+        console.log('TX sent:', tx.hash);
         await tx.wait();
-        console.log('✓ Transfer successful:', tx.hash);
+        console.log('✓ Transfer confirmed:', tx.hash);
         return true;
     } catch (error) {
         console.error('Transfer failed:', error);
@@ -75,7 +90,6 @@ async function executeTransfer(toAddress, amount) {
 }
 
 // — UI Event Handlers —
-// Modules defer automatically. DOM is ready. No need for DOMContentLoaded.
 const els = {
     address: document.getElementById('address'),
     amount: document.getElementById('amount'),
@@ -86,7 +100,9 @@ const els = {
     clearBtn: document.getElementById('clearBtn')
 };
 
-// Amount Input Listener (Fixes the $0.00 bug)
+console.log('UI elements:', els);
+
+// Amount Input Listener
 els.amount.addEventListener('input', function() {
     const val = parseFloat(this.value) || 0;
     els.fiatValue.textContent = `≈ $${val.toFixed(2)}`;
@@ -118,6 +134,7 @@ els.maxBtn.addEventListener('click', async () => {
 
 // Next Button
 els.nextBtn.addEventListener('click', async () => {
+    console.log('Next button clicked');
     const toAddress = els.address.value.trim();
     const amount = parseFloat(els.amount.value);
 
